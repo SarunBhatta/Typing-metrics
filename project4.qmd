@@ -1,0 +1,508 @@
+---
+title: "Project 4"
+author: "Ann, Ndeksia, Sarun, Mary"
+format: html
+editor: source
+---
+
+## Preliminaries
+
+```{r}
+# read in file
+# read.table uses white space as a delimiter by default
+datafile = "C:\\Users\\username\\Documents\\STAT_601\\Project04\\DSL-StrongPasswordData.txt"
+data = read.table(datafile,header=1)
+
+# See data summary in tabular form
+library(psych)
+vis <- describe(data)
+#View(vis)
+```
+
+## Adding Columns; Summarizing; Histogram-Boxplot
+
+```{r histogram-boxplots}
+library(dplyr)
+library(MASS)
+
+# Added new columns - total_typing_time, average key hold time and average time between keys
+data$total_typing_time <- rowSums(data[, grep("^H\\.|^DD\\.|^UD\\.", names(data))])
+data$mean_key_hold_time <- rowMeans(data[, grep("^H\\.", names(data))])
+data$mean_time_between_keys <- rowMeans(data[, grep("^DD\\.|^UD\\.", names(data))])
+
+data$total_hold_time <- rowSums(data[, grep("^H\\.",names(data))])
+data$total_UD_time <- rowSums(data[, grep("^UD\\.",names(data))])
+data$total_DD_time <- rowSums(data[, grep("^DD\\.",names(data))])
+data$Treps = (data$sessionIndex - 1) * 50 + data$rep
+
+head(data)
+truehist(data$total_typing_time, xlim = c(0,35),xlab = "time",main = "total time")
+truehist(data$total_hold_time, xlim=c(0,2),xlab = "time", main = "total hold time")
+truehist(data$total_UD_time, xlim = c(0,8),xlab = "time", main = "total UD time")
+truehist(data$total_DD_time, xlim = c(0,8),xlab = "time", main = "total DD time")
+
+# Also added a change in typing time
+
+# Add a column for change in typing time per session for each subject/row 
+data <- data %>%
+  arrange(subject, sessionIndex) %>%
+  group_by(subject) %>%
+  mutate(
+    change_in_typing_time = total_typing_time - lag(total_typing_time),
+    change_in_key_hold_time = mean_key_hold_time - lag(mean_key_hold_time)
+  )
+
+# Summarize by subject
+subject_summary <- data %>%
+  group_by(subject) %>%
+  summarise(
+    mean_change_typing_time = mean(change_in_typing_time, na.rm = TRUE),
+    sd_change_typing_time = sd(change_in_typing_time, na.rm = TRUE)
+  )
+
+grouped_data <- data %>% group_by(subject)
+#View(grouped_data)
+#View(subject_summary)
+```
+
+## Heatmaps
+
+``` {r heatmaps}
+# The heatmap of mean change in typing time across sessions for each subject 
+# Calculate the change in typing time between sessions
+typing_changes_between_sessions <- grouped_data %>%
+  mutate(typing_time_diff = total_typing_time - lag(total_typing_time)) %>%
+  ungroup() %>%
+  group_by(subject, sessionIndex) %>%
+  summarise(mean_change_typing_time = mean(typing_time_diff))
+#View(typing_changes_between_sessions)
+
+library(ggplot2)
+library(reshape2)
+
+# Pivot the data to wide format
+data_wide <- dcast(typing_changes_between_sessions, subject ~ sessionIndex, value.var = "mean_change_typing_time")
+
+# Melt the data to long format
+data_long <- melt(data_wide, id.vars = "subject")
+
+# Subset the data for readability
+subset1 <- data_long %>% filter(subject >= "s002" & subject <= "s020")
+subset2 <- data_long %>% filter(subject >= "s021" & subject <= "s039")
+subset3 <- data_long %>% filter(subject >= "s040")
+
+
+# Plot the heatmap
+ggplot(subset1, aes(x = variable, y = subject, fill = value)) +
+  geom_tile() +
+  scale_fill_gradient2(low = "blue", mid = "white", high = "red") +
+  labs(x = "Session", y = "Subject", fill = "Change in Typing Time") +
+  theme_classic()+
+  ggtitle("Change in typing time for subects 2-20 across sessions")
+
+ggplot(subset2, aes(x = variable, y = subject, fill = value)) +
+  geom_tile() +
+  scale_fill_gradient2(low = "blue", mid = "white", high = "red") +
+  labs(x = "Session", y = "Subject", fill = "Change in Typing Time") +
+  theme_classic()+
+  ggtitle("Change in typing time for subects 21-39 across sessions")
+
+ggplot(subset3, aes(x = variable, y = subject, fill = value)) +
+  geom_tile() +
+  scale_fill_gradient2(low = "blue", mid = "white", high = "red") +
+  labs(x = "Session", y = "Subject", fill = "Change in Typing Time") +
+  theme_classic()+
+  ggtitle("Change in typing time for subjects 40-57 across sessions")
+```
+## Scatterplots I
+
+One for each subject, all attempts, with linear trend line
+
+``` {r}
+subjects = unique(data$subject)
+sessions = unique(data$sessionIndex)
+
+#combining sessions (Treps); one plot for each individual
+for(i in subjects) {
+  df = subset(data, subject == i)
+  model <- lm(df$total_DD_time ~ df$Treps)
+  
+  plot(df$Treps,df$total_DD_time, main = i)
+  abline(v= c(51,101,151,201,251,301,351),col = "red")
+  abline(model)
+}
+```
+## Scatterplots II
+One for each subject, sessions color-coded, Lowess Smoothing
+
+```{r}
+# For this code, I'm trying to do scatter plot like Ann's but putting into account session Index, somehow, I can't see the plot in my plot pane. Maybe someone can run it and see
+library(ggplot2)
+library(dplyr)
+
+# Define a custom color palette
+custom_colors <- c(
+  "1" = "#1f77b4",  # Blue
+  "2" = "#ff7f0e",  # Orange
+  "3" = "#2ca02c",  # Green
+  "4" = "#d62728",  # Red
+  "5" = "#9467bd",  # Purple
+  "6" = "#17becf",  # Cyan
+  "7" = "#bcbd22",  # Lime Yellow
+  "8" = "#ff1493"   # Hot Pink
+)
+
+# Get unique subjects
+subjects <- unique(data$subject)
+
+# Loop through each subject and plot
+for (subject in subjects) {
+  # Filter data for the current subject
+  df_subject <- data %>% filter(subject == !!subject)
+  
+  # Generate the plot dynamically
+  print(
+    ggplot(df_subject, aes(x = as.numeric(rep), y = total_typing_time, color = factor(sessionIndex))) +
+      geom_point(alpha = 0.6, position = position_jitter(width = 0.2)) +
+      geom_smooth(
+        method = "loess",
+        se = FALSE,
+        aes(group = sessionIndex),
+        span = 0.5,
+        linewidth = 0.8,
+        alpha = 0.7
+      ) +
+      theme_minimal() +
+      labs(
+        title = paste("Typing Dynamics for Subject:", subject),  # Dynamic title
+        x = "Rep",
+        y = "Total Typing Time",
+        color = "Session Index"
+      ) +
+      scale_color_manual(values = custom_colors) +
+      theme(axis.text.x = element_text(angle = 90, hjust = 1, size = 7))
+  )
+  
+  # Pause to allow viewing before moving to the next plot
+  #Sys.sleep(2)
+}
+
+```
+
+## Overall trend in typing time across sessions
+
+```{r}
+# Overall trend in change in typing time across sessions
+
+ggplot(data, aes(x = sessionIndex, y = change_in_typing_time)) +
+  geom_smooth(method = "loess", color = "blue") +
+  theme_minimal() +
+  labs(
+    title = "Overall Trend in Change in Typing Time", 
+    x = "Session Index", 
+    y = "Change in Typing Time"
+  ) +
+  scale_y_continuous(
+    #limits = c(-0.3, 0.2),  # Adjust the range of the y-axis as needed
+    #breaks = seq(-0.3, 0.2, by = 0.1) # Adjust the interval between ticks
+  )
+
+```
+
+## Fitting linear mixed models with lmer; Subject is random effect
+
+Fit with both intercept and slope-intercept and compare.
+
+### First attempt 
+
+Warnings: Model fails to converge within its parameters; very large eigenvalue
+
+```{r}
+# Fitting the models
+library(lme4)
+
+# Fit 2 mixed-effects model
+model2 <- lmer(total_typing_time ~ + rep + sessionIndex + (rep | subject), data = data, REML = FALSE)
+model <- lmer( total_typing_time ~ rep + sessionIndex + (1 | subject), data = data, REML = FALSE)
+
+# Summary of the model
+anova(model, model2)
+
+```
+
+### Scaling the data, then fitting
+
+Message: boundary (singular) fit: see help('isSingular')
+(Some "dimensions" of the variance-covariance matrix have been estimated as exactly zero.)
+
+```{r}
+# scaling the data
+scaled_data <- data %>%
+  mutate(
+    scaled_total_typing_time = scale(total_typing_time),
+    scaled_rep = scale(rep),
+    scaled_sessionIndex = scale(sessionIndex)
+  )
+model <- lmer(
+  scaled_total_typing_time ~ scaled_rep + scaled_sessionIndex + (1 | subject),
+  data = scaled_data,
+  REML = FALSE
+)
+model2 <- lmer(
+  scaled_total_typing_time ~ scaled_rep + scaled_sessionIndex + (scaled_rep | subject),
+  data = scaled_data,
+  REML = FALSE
+)
+anova(model, model2)
+```
+
+### Adding an interaction term
+
+Message: boundary (singular) fit: see help('isSingular')
+(Some "dimensions" of the variance-covariance matrix have been estimated as exactly zero.)
+
+```{r}
+# Adding a third model to account for interaction between variables
+model3 <- lmer(
+  scaled_total_typing_time ~ scaled_rep * scaled_sessionIndex + (1 + scaled_rep | subject),
+  data = scaled_data,
+  REML = FALSE
+)
+model2 <- lmer(
+  scaled_total_typing_time ~ scaled_rep + scaled_sessionIndex + (scaled_rep | subject),
+  data = scaled_data,
+  REML = FALSE
+)
+anova(model2,model3 )
+summary(model3)
+```
+
+From the QIC values, model4 was best with lowest value
+
+
+### Checking model assumptions for the models above
+
+However, residuals indicate that the assumption of normality is not met.
+
+
+```{r}
+# To see for all models, replace model3 with model and model2
+par(mfrow = c(1,2))
+qint <- ranef(model3)$subject[["(Intercept)"]]
+qres <- residuals(model3)
+qqnorm(qint, ylab = "Estimated random intercepts",
+       main = "Random intercepts")
+qqline(qint, col = "red", lwd = 3)
+qqnorm(qres,
+       ylab = "Estimated residuals",
+       main = "Residuals")
+qqline(qres, col = "red", lwd = 3)
+```
+
+## Fitting non-linear models: gaussian and gamma
+
+```{r gauss-gamma}
+# Fit different models to see which one works best. From the QIC values, model4 was best with lowest value but since we weren't sure of normality, I decided to go ahead and make predictions with both a gaussian model and a gamma model
+library(gee)
+library(MuMIn)
+
+data$subject <- as.factor(data$subject)
+
+model4 <- gee(total_typing_time ~ rep + sessionIndex, data = data, id = subject, family = gaussian, corstr = "exchangeable")
+
+model5 <- gee(total_typing_time ~ rep * sessionIndex, data = data, id = subject, family = gaussian, corstr = "exchangeable")
+
+model6 <- gee(total_typing_time ~ rep + sessionIndex, data = data, id = subject, family = Gamma(link = "log"), corstr = "exchangeable")
+model7 <- gee(total_typing_time ~ rep * sessionIndex, data = data, id = subject, family = Gamma(link = "log"), corstr = "exchangeable")
+
+QIC(model4)
+QIC(model5)
+QIC(model6)
+QIC(model7)
+coef_table1 <- summary(model4)$coefficients
+print(coef_table1)
+coef_table2 <- summary(model5)$coefficients
+print(coef_table2)
+coef_table3 <- summary(model6)$coefficients
+print(coef_table3)
+coef_table4 <- summary(model7)$coefficients
+print(coef_table4)
+```
+
+### p-values
+
+```{r}
+# To get the p-value associated with each predictors for each model
+models <- list(model4, model5, model6, model7)
+
+# Initialize a list to store results
+pvalue_results <- list()
+
+# Loop through each model
+for (i in seq_along(models)) {
+  model <- models[[i]]
+  # Extract coefficients and standard errors
+  coef <- summary(model)$coefficients[, "Estimate"]
+  se <- summary(model)$coefficients[, "Robust S.E."]
+  
+  # Compute Wald statistics and p-values
+  wald_stat <- coef / se
+  p_values <- 2 * pnorm(-abs(wald_stat))
+  
+  # Store in a data frame
+  pvalue_results[[i]] <- data.frame(
+    Model = paste("Model", i),
+    Coefficients = coef,
+    SE = se,
+    Wald_Statistic = wald_stat,
+    P_Value = p_values
+  )
+}
+
+# Combine all results into one data frame
+final_results <- do.call(rbind, pvalue_results)
+
+# Print the results
+print(final_results)
+```
+```{r}
+# Their qq-plot
+# Loop through each model
+for (i in 1:length(models)) {
+  # Extract residuals
+  gee_residuals <- residuals(models[[i]], type = "working")  # Use Pearson residuals
+  
+  # Generate QQ plot
+  qqnorm(gee_residuals, ylab = "Working Residuals", main = paste("Model", i, "QQ Plot"))
+  qqline(gee_residuals, col = "red", lwd = 2)  # Add reference line
+}
+
+```
+
+## Linear Mixed Models: sessionIndex as random effect
+
+Different model used for each subject.
+The intercept-slope version was not converging well and was abandoned.
+Residual plots are mostly normal.
+
+```{r}
+# linear mixed model: separate model for each subject
+# using session as the random effect
+# using total hold time for the response variable
+# using only the intercept model because most of the slope-intercept models don't converge well
+
+data$total_hold_time <- rowSums(data[, grep("^H\\.",names(data))])
+
+for(i in subjects) {
+  df = subset(data, subject == i)
+  #model_tRepIS <- lmer(total_hold_time ~ rep  + (rep | sessionIndex), data = df, REML = FALSE)
+  model_tRepI <- lmer( total_hold_time ~ rep  + (1 | sessionIndex), data = df, REML = FALSE)
+  
+  # Summary of the model
+  #anova(model_tRepI, model_tRepIS)
+  
+  
+  # qq plots
+  par(mfrow = c(1,2))
+  qint <- ranef(model_tRepI)$sessionIndex[["(Intercept)"]]
+  qres <- residuals(model_tRepI)
+  qqnorm(qint, ylab = "Estimated random intercepts",
+         main = "Random intercepts")
+  qqline(qint, col = "red", lwd = 3)
+  qqnorm(qres,
+         ylab = "Estimated residuals",
+         main = "Residuals")
+  qqline(qres, col = "red", lwd = 3)
+  
+  # extract coefficients
+  coefs <- data.frame(coef(summary(model_tRepI)))
+  # use normal distribution to approximate p-value
+  coefs$p.z <- 2 * (1 - pnorm(abs(coefs$t.value)))
+  coefs
+  
+}
+```
+## 51 GEE models: rep + sessionIndex
+```{r, message = F}
+# Initialize a list to store models
+models <- list()
+
+# Suppress output while fitting models
+for (i in unique(data$subject)) {
+  subject_data <- data[data$subject == i, ]
+  
+  # Suppress intermediate output
+  capture.output({
+    model <- gee(total_typing_time ~ rep + sessionIndex,
+                 data = subject_data,
+                 id = subject_data$subject,  # Correctly specify the 'id'
+                 family = Gamma(link = "log"), corstr = "exchangeable")
+  })
+  
+  # Store the model
+  models[[as.character(i)]] <- model
+}
+```
+# clustering
+```{r}
+library(mclust)
+# Extract coefficients from all models
+coef_matrix <- do.call(rbind, lapply(models, function(model) {
+  coef(model)  # Extract coefficients for each model
+}))
+
+# Run Mclust on coefficients
+clustering_result <- Mclust(coef_matrix)
+
+# Display clustering summary
+summary(clustering_result)
+
+# Visualize clustering
+plot(clustering_result, what = "classification")
+
+interaction_coefficients <- sapply(models, function(model) coef(model)["rep:sessionIndex"])
+summary(interaction_coefficients)
+```
+
+```
+## 51 GEE models: rep * sessionIndex
+```{r, message = F}
+# Initialize a list to store models
+models <- list()
+
+# Suppress output while fitting models
+for (i in unique(data$subject)) {
+  subject_data <- data[data$subject == i, ]
+  
+  # Suppress intermediate output
+  capture.output({
+    model <- gee(total_typing_time ~ rep * sessionIndex,
+                 data = subject_data,
+                 id = subject_data$subject,  # Correctly specify the 'id'
+                 family = Gamma(link = "log"), corstr = "exchangeable")
+  })
+  
+  # Store the model
+  models[[as.character(i)]] <- model
+}
+```
+# clustering
+```{r}
+library(mclust)
+# Extract coefficients from all models
+coef_matrix <- do.call(rbind, lapply(models, function(model) {
+  coef(model)  # Extract coefficients for each model
+}))
+
+# Run Mclust on coefficients
+clustering_result <- Mclust(coef_matrix)
+
+# Display clustering summary
+summary(clustering_result)
+
+# Visualize clustering
+plot(clustering_result, what = "classification")
+
+interaction_coefficients <- sapply(models, function(model) coef(model)["rep:sessionIndex"])
+summary(interaction_coefficients)
+```
